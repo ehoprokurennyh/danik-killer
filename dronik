@@ -1,0 +1,197 @@
+#!/home/x86monkey/py/testp/bin/python
+import chess
+import chess.engine
+import logging
+from random import random
+
+import math
+
+logger = logging.getLogger('test')
+logger.addHandler(logging.FileHandler('./test.log'))
+
+costs = [1.0, 1.0, 3.0, 3.0, 5.0, 9.0, 10.0]
+first_rank_penalties = [0.0, 0.0, 0.2, 0.15, 0.05, 0.05, -0.3]
+
+class Model:
+    def __init__(self, fen=None):
+        self._board = chess.Board()
+        if fen is not None:
+            self._board.set_fen(fen)
+
+        self.score = 0.0
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE]):
+            self.score += costs[self._board.piece_type_at(piece)]
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK]):
+            self.score -= costs[self._board.piece_type_at(piece)]
+
+        if self._board.turn == chess.BLACK:
+            self.score = -self.score
+
+    def push(self, move):
+        if self._board.is_capture(move):
+            self.score += 1.0 if self._board.is_en_passant(move) else costs[self._board.piece_type_at(move.to_square)]
+        if move.promotion is not None:
+            self.score += costs[move.promotion] - 1
+        self.score = -self.score
+        return self._board.push(move)
+
+    def pop(self):
+        move = self._board.pop()
+        if self._board.is_capture(move):
+            self.score += 1.0 if self._board.is_en_passant(move) else costs[self._board.piece_type_at(move.to_square)]
+        if move.promotion is not None:
+            self.score += costs[move.promotion] - 1
+        self.score = -self.score
+
+    def get_moves(self):
+        return sorted(self._board.generate_legal_moves(), key=self._moves_sort_key)
+
+    def get_captures(self):
+        return sorted(self._board.generate_legal_captures(), key=self._moves_sort_key)
+
+    def _moves_sort_key(self, move):
+        if self._board.is_into_check(move):
+            self._board.push(move)
+            checkmate = self._board.is_checkmate()
+            self._board.pop()
+            return -100.0 if checkmate else -10.0
+        elif move.promotion is not None:
+            return -move.promotion
+        elif self._board.is_capture(move):
+            if self._board.is_en_passant(move):
+                return -1.0
+            delta = costs[self._board.piece_type_at(move.to_square)] - costs[self._board.piece_type_at(move.from_square)]
+            return min(-1.0, delta)
+        elif self._board.is_castling(move):
+            return -0.5 
+        elif self._board.piece_type_at(move.from_square) == 6:
+            return 1.0
+        return 0.0
+
+    def evaluate(self):
+        res = self.score
+        color = 1 if self._board.turn else -1
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & chess.BB_RANK_1):
+            res -= first_rank_penalties[self._board.piece_type_at(piece)] * color
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & chess.BB_RANK_8):
+            res += first_rank_penalties[self._board.piece_type_at(piece)] * color
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns):
+            res += 0.05 * color * (piece // 8)
+            res -= 0.02 * color * abs(piece % 8 - 3.5)
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & self._board.pawns):
+            res -= 0.05 * color * (7.0 - piece // 8)
+            res += 0.02 * color * abs(piece % 8 - 3.5)
+
+        return res
+
+    def is_gameover(self):
+        return self._board.is_game_over()
+
+    def result(self):
+        return -10000.0 if self._board.is_checkmate() else 0.0
+
+def quiesce(model, alpha, beta):
+    if model.is_gameover():
+        result = model.result()
+        if result < alpha:
+            return alpha
+        return min(result, beta)
+
+    score = model.evaluate()
+    if score >= beta:
+        return beta
+    if alpha < score:
+        alpha = score
+    for move in model.get_captures():
+        if not model._board.is_en_passant(move):
+            my = costs[model._board.piece_type_at(move.from_square)]
+            his = costs[model._board.piece_type_at(move.to_square)]
+            if my > his and model._board.attackers(not model._board.turn, move.to_square):
+                continue
+        model.push(move)
+        score = -quiesce(model, -beta, -alpha)
+        model.pop()
+        if score >= beta:
+            return beta
+        elif score > alpha:
+            alpha = score
+    return alpha
+
+def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
+    best_move = None
+    if depth <= 0:
+        return quiesce(model, alpha, beta), best_move
+    for move in model.get_moves():
+        model.push(move)
+        score = -alpha_beta(model, -beta, -alpha, depth - 1)[0]
+        if score < -5000.0:
+            score += 1.0
+        if score > 5000.0:
+            score -= 1.0
+        model.pop()
+        if score > alpha:
+            best_move = move
+            alpha = score
+            if score >= beta:
+                return beta, best_move
+    return alpha, best_move
+
+#e = chess.engine.SimpleEngine.popen_uci('/home/x86monkey/cpp/chess/Deepov/Deepov')
+#e = chess.engine.SimpleEngine.popen_uci('stockfish')
+
+def calc_depth(m, time):
+    x = math.sqrt(max(1000, (time - 30000)) * (1 + random())) * 1000 / (len(list(chess.scan_forward(m._board.occupied & ~m._board.pawns))) + 2) ** 3
+    res = round(math.log(x))
+    if res > 7:
+        return 7
+    elif res < 3:
+        return 3
+    return res
+
+def main():
+    m = Model()
+    while True:
+        try:
+            tokens = input().split()
+            logger.error(tokens)
+            cmd = tokens[0]
+            args = tokens[1:]
+            if cmd == 'uci':
+                print('uciok')
+            elif cmd == 'isready':
+                print('readyok')
+            elif cmd == 'ucinewgame':
+                m = Model()
+            elif cmd == 'setoption':
+                pass
+            elif cmd == 'position':
+                logger.error('setting position')
+                if args[0] == 'startpos':
+                    m = Model()
+                elif args[0] == 'fen':
+                    m = Model(args[1])
+                moves = args[args.index('moves') + 1:] if 'moves' in args else []
+                logger.error('moves: {}'.format(moves))
+                for move in moves:
+                    m.push(chess.Move.from_uci(move))
+            elif cmd == 'go':
+                if 'movetime' in args:
+                    k = 'movetime'
+                else:
+                    k = 'wtime' if m._board.turn == chess.WHITE else 'btime'
+                time = float(args[args.index(k) + 1]) if k in args else 0
+                logger.error('time {}'.format(time))
+                depth = calc_depth(m, time)
+                logger.error('depth {}'.format(depth))
+                _, move = alpha_beta(m, depth=depth)
+                print('bestmove {}'.format(move))
+        except Exception as e:
+            logger.error('exception:{}'.format(str(e)))
+
+if __name__ == '__main__':
+    main()
