@@ -259,7 +259,7 @@ def main():
                     k = 'movetime'
                 else:
                     k = 'wtime' if m._board.turn == chess.WHITE else 'btime'
-                time = float(args[args.index(k) + 1]) if k in args else 0
+                time = float(args[args.index(k) + 1]) if k in args else 90000
                 depth = calc_depth(m, time)
                 score, move = alpha_beta(m, depth=depth)
                 print('info score cp {} depth {}'.format(round(score * 100), depth))
