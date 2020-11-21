@@ -131,7 +131,6 @@ class Model:
         for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & chess.BB_RANK_8):
             res += first_rank_penalties[self._board.piece_type_at(piece)] * color
 
-
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns):
             res += 0.05 * color * (piece // 8)
             res -= 0.02 * color * abs(piece % 8 - 3.5)
@@ -139,6 +138,14 @@ class Model:
         for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & self._board.pawns):
             res -= 0.05 * color * (7.0 - piece // 8)
             res += 0.02 * color * abs(piece % 8 - 3.5)
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns & (chess.C3 | chess.D3 | chess.E3)):
+            if self._board.occupied & (piece + 8):
+                res -= 0.3 * color
+
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns & (chess.C6 | chess.D6 | chess.E6)):
+            if self._board.occupied & (piece + 8):
+                res += 0.3 * color
 
         return res
 
