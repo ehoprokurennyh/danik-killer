@@ -126,10 +126,18 @@ class Model:
         endgame = 1 if count < 4 else -1
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & chess.BB_RANK_1):
-            res -= first_rank_penalties[self._board.piece_type_at(piece)] * color
+            piece_type = self._board.piece_type_at(piece)
+            delta = first_rank_penalties[piece_type] * color
+            if piece_type == chess.KING:
+                delta *= endgame
+            res -= delta
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & chess.BB_RANK_8):
-            res += first_rank_penalties[self._board.piece_type_at(piece)] * color
+            piece_type = self._board.piece_type_at(piece)
+            delta = first_rank_penalties[piece_type] * color
+            if piece_type == chess.KING:
+                delta *= endgame
+            res += delta
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns):
             res += 0.05 * color * (piece // 8)
