@@ -144,7 +144,7 @@ class Model:
                 res -= 0.3 * color
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns & (chess.C6 | chess.D6 | chess.E6)):
-            if self._board.occupied & (piece + 8):
+            if self._board.occupied & (piece - 8):
                 res += 0.3 * color
 
         return res
