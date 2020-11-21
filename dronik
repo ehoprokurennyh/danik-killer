@@ -84,11 +84,28 @@ class Model:
             return 1.0
         return 0.0
 
+    def endgame_mate(self, strong_side):
+        res = 0.6
+        weak_side = chess.BLACK if strong_side == chess.WHITE else chess.WHITE
+        weak_king = chess.msb(self._board.occupied_co[weak_side] & self._board.kings)
+        weak_king_file, weak_king_rank = weak_king % 8, weak_king // 8
+        res += 0.05 * abs(weak_king_file - 3.5)
+        res += 0.05 * abs(weak_king_rank - 3.5)
+        for piece in chess.scan_forward(self._board.occupied_co[strong_side]):
+            res += 0.01 * (8 - abs(piece % 8 - weak_king_file))
+            res += 0.01 * (8 - abs(piece // 8 - weak_king_rank))
+        return res
+
     def evaluate(self):
         if self.hash in self._prev:
             return 0.0
         res = self.score
         color = 1 if self._board.turn else -1
+
+        if self._board.occupied_co[chess.WHITE] & ~self._board.kings == 0:
+            return res - self.endgame_mate(chess.BLACK) * color
+        elif self._board.occupied_co[chess.BLACK] & ~self._board.kings == 0:
+            return res + self.endgame_mate(chess.WHITE) * color
 
         count = 0
         for _ in chess.scan_forward(self._board.rooks | self._board.queens):
@@ -132,7 +149,9 @@ class Model:
 def quiesce(model, alpha, beta):
     if model.is_gameover():
         result = model.result()
-        if result < alpha and result != 0.0:
+        if result == 0.0 and result >= beta:
+            return result
+        if result < alpha:
             return alpha
         return min(result, beta)
 
@@ -164,6 +183,8 @@ def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
     if not moves:
         return quiesce(model, alpha, beta), None
     best_move = moves[0]
+    if model.is_gameover() and model.result() == 0.0:
+        beta = 0.0
     for move in moves:
         model.push(move)
         score = -alpha_beta(model, -beta, -alpha, depth - 1)[0]
@@ -176,6 +197,8 @@ def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
             best_move = move
             alpha = score
             if score >= beta:
+                if score == 0.0:
+                    beta = score
                 return beta, best_move
     return alpha, best_move
 
