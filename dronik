@@ -162,10 +162,8 @@ def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
         return quiesce(model, alpha, beta), best_move
     moves = list(model.get_moves())
     if not moves:
-        return model.evaluate(), None
+        return quiesce(model, alpha, beta), None
     best_move = moves[0]
-    if model.is_gameover():
-        beta = 0.0
     for move in moves:
         model.push(move)
         score = -alpha_beta(model, -beta, -alpha, depth - 1)[0]
