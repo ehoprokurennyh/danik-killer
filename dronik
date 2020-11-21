@@ -147,11 +147,11 @@ class Model:
             res -= 0.05 * color * (7.0 - piece // 8)
             res += 0.02 * color * abs(piece % 8 - 3.5)
 
-        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns & (chess.C3 | chess.D3 | chess.E3)):
+        for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns & (chess.C2 | chess.D2 | chess.E2)):
             if self._board.occupied & (piece + 8):
                 res -= 0.3 * color
 
-        for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & self._board.pawns & (chess.C6 | chess.D6 | chess.E6)):
+        for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & self._board.pawns & (chess.C7 | chess.D7 | chess.E7)):
             if self._board.occupied & (piece - 8):
                 res += 0.3 * color
 
