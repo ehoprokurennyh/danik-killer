@@ -1,16 +1,18 @@
 #!/home/x86monkey/py/testp/bin/python
 import chess
 import chess.engine
+from chess.polyglot import ZobristHasher, POLYGLOT_RANDOM_ARRAY
 import logging
 from random import random
-
 import math
 
 logger = logging.getLogger('test')
 logger.addHandler(logging.FileHandler('./test.log'))
 
-costs = [1.0, 1.0, 3.0, 3.0, 5.0, 9.0, 10.0]
-first_rank_penalties = [0.0, 0.0, 0.2, 0.15, 0.05, 0.05, -0.3]
+hasher = ZobristHasher(POLYGLOT_RANDOM_ARRAY)
+
+costs = [1.0, 1.0, 3.05, 3.17, 5.0, 9.0, 10.0]
+first_rank_penalties = [0.0, 0.0, 0.2, 0.15, 0.01, 0.05, 0.21]
 
 class Model:
     def __init__(self, fen=None):
@@ -28,16 +30,28 @@ class Model:
         if self._board.turn == chess.BLACK:
             self.score = -self.score
 
+        self._prev = set()
+        self._rehash()
+
+    def _rehash(self):
+        self.hash = hasher(self._board)
+
     def push(self, move):
+        self._prev.add(self.hash)
         if self._board.is_capture(move):
             self.score += 1.0 if self._board.is_en_passant(move) else costs[self._board.piece_type_at(move.to_square)]
         if move.promotion is not None:
             self.score += costs[move.promotion] - 1
         self.score = -self.score
-        return self._board.push(move)
+        self._board.push(move)
+        self._rehash()
+        return move
 
     def pop(self):
         move = self._board.pop()
+        if self.hash in self._prev:
+            self._prev.remove(self.hash)
+        self._rehash()
         if self._board.is_capture(move):
             self.score += 1.0 if self._board.is_en_passant(move) else costs[self._board.piece_type_at(move.to_square)]
         if move.promotion is not None:
@@ -51,12 +65,13 @@ class Model:
         return sorted(self._board.generate_legal_captures(), key=self._moves_sort_key)
 
     def _moves_sort_key(self, move):
-        if self._board.is_into_check(move):
-            self._board.push(move)
-            checkmate = self._board.is_checkmate()
+        self._board.push(move)
+        try:
+            if self._board.is_check():
+                return -100.0 if self._board.is_checkmate() else -10.0
+        finally:
             self._board.pop()
-            return -100.0 if checkmate else -10.0
-        elif move.promotion is not None:
+        if move.promotion is not None:
             return -move.promotion
         elif self._board.is_capture(move):
             if self._board.is_en_passant(move):
@@ -70,14 +85,33 @@ class Model:
         return 0.0
 
     def evaluate(self):
+        if self.hash in self._prev:
+            return 0.0
         res = self.score
         color = 1 if self._board.turn else -1
+
+        count = 0
+        for _ in chess.scan_forward(self._board.rooks | self._board.queens):
+            count += 1
+
+        endgame = 1 if count < 4 else -1
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & chess.BB_RANK_1):
             res -= first_rank_penalties[self._board.piece_type_at(piece)] * color
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & chess.BB_RANK_8):
             res += first_rank_penalties[self._board.piece_type_at(piece)] * color
+
+        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.WHITE] for file in chess.BB_FILES):
+            count = len(list(chess.scan_forward(pawns)))
+            if count > 1:
+                res -= 0.043 * count ** 1.1 * color
+
+        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.BLACK] for file in chess.BB_FILES):
+            count = len(list(chess.scan_forward(pawns)))
+            if count > 1:
+                res += 0.043 * count ** 1.1 * color
+
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns):
             res += 0.05 * color * (piece // 8)
@@ -90,15 +124,15 @@ class Model:
         return res
 
     def is_gameover(self):
-        return self._board.is_game_over()
+        return self._board.is_game_over() or self.hash in self._prev
 
     def result(self):
-        return -10000.0 if self._board.is_checkmate() else 0.0
+        return -1000.0 if self._board.is_checkmate() else 0.0
 
 def quiesce(model, alpha, beta):
     if model.is_gameover():
         result = model.result()
-        if result < alpha:
+        if result < alpha and result != 0.0:
             return alpha
         return min(result, beta)
 
@@ -126,7 +160,13 @@ def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
     best_move = None
     if depth <= 0:
         return quiesce(model, alpha, beta), best_move
-    for move in model.get_moves():
+    moves = list(model.get_moves())
+    if not moves:
+        return model.evaluate(), None
+    best_move = moves[0]
+    if model.is_gameover():
+        beta = 0.0
+    for move in moves:
         model.push(move)
         score = -alpha_beta(model, -beta, -alpha, depth - 1)[0]
         if score < -5000.0:
@@ -141,16 +181,15 @@ def alpha_beta(model, alpha=-10000, beta=10000, depth=4):
                 return beta, best_move
     return alpha, best_move
 
-#e = chess.engine.SimpleEngine.popen_uci('/home/x86monkey/cpp/chess/Deepov/Deepov')
-#e = chess.engine.SimpleEngine.popen_uci('stockfish')
-
 def calc_depth(m, time):
-    x = math.sqrt(max(1000, (time - 30000)) * (1 + random())) * 1000 / (len(list(chess.scan_forward(m._board.occupied & ~m._board.pawns))) + 2) ** 3
-    res = round(math.log(x))
-    if res > 7:
-        return 7
-    elif res < 3:
+    if time < 10000:
         return 3
+    x = math.sqrt(max(5000, (time - 44444)) * (1 + random() / 2)) * 200 / (len(list(chess.scan_forward(m._board.occupied & ~m._board.pawns))) + 5) ** 2
+    res = round(math.log(x))
+    if res > 5:
+        return 5
+    elif res < 4:
+        return 4
     return res
 
 def main():
@@ -170,13 +209,11 @@ def main():
             elif cmd == 'setoption':
                 pass
             elif cmd == 'position':
-                logger.error('setting position')
+                moves = args[args.index('moves') + 1:] if 'moves' in args else []
                 if args[0] == 'startpos':
                     m = Model()
                 elif args[0] == 'fen':
-                    m = Model(args[1])
-                moves = args[args.index('moves') + 1:] if 'moves' in args else []
-                logger.error('moves: {}'.format(moves))
+                    m = Model(' '.join(args[1:args.index('moves')] if moves else args[1:]))
                 for move in moves:
                     m.push(chess.Move.from_uci(move))
             elif cmd == 'go':
@@ -185,10 +222,9 @@ def main():
                 else:
                     k = 'wtime' if m._board.turn == chess.WHITE else 'btime'
                 time = float(args[args.index(k) + 1]) if k in args else 0
-                logger.error('time {}'.format(time))
                 depth = calc_depth(m, time)
-                logger.error('depth {}'.format(depth))
-                _, move = alpha_beta(m, depth=depth)
+                score, move = alpha_beta(m, depth=depth)
+                print('info score cp {} depth {}'.format(round(score * 100), depth))
                 print('bestmove {}'.format(move))
         except Exception as e:
             logger.error('exception:{}'.format(str(e)))
