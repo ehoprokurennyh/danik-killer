@@ -104,6 +104,16 @@ class Model:
         res = self.score
         color = 1 if self._board.turn else -1
 
+        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.WHITE] for file in chess.BB_FILES):
+            count = len(list(chess.scan_forward(pawns)))
+            if count > 1:
+                res -= 0.043 * count ** 1.1 * color
+
+        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.BLACK] for file in chess.BB_FILES):
+            count = len(list(chess.scan_forward(pawns)))
+            if count > 1:
+                res += 0.043 * count ** 1.1 * color
+
         if self._board.occupied_co[chess.WHITE] & ~self._board.kings == 0:
             return res - self.endgame_mate(chess.BLACK) * color
         elif self._board.occupied_co[chess.BLACK] & ~self._board.kings == 0:
@@ -120,16 +130,6 @@ class Model:
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.BLACK] & chess.BB_RANK_8):
             res += first_rank_penalties[self._board.piece_type_at(piece)] * color
-
-        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.WHITE] for file in chess.BB_FILES):
-            count = len(list(chess.scan_forward(pawns)))
-            if count > 1:
-                res -= 0.043 * count ** 1.1 * color
-
-        for pawns in (file & self._board.pawns & self._board.occupied_co[chess.BLACK] for file in chess.BB_FILES):
-            count = len(list(chess.scan_forward(pawns)))
-            if count > 1:
-                res += 0.043 * count ** 1.1 * color
 
 
         for piece in chess.scan_forward(self._board.occupied_co[chess.WHITE] & self._board.pawns):
